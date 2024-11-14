@@ -20,10 +20,8 @@ import qz.exception.MissingArgException;
 import qz.installer.Installer;
 import qz.installer.TaskKiller;
 import qz.installer.certificate.CertificateManager;
-import qz.build.provision.ProvisionBuilder;
 
 import java.io.File;
-import java.lang.reflect.Field;
 import java.util.*;
 import java.util.List;
 
@@ -50,8 +48,7 @@ public class ArgParser {
     protected static final Logger log = LogManager.getLogger(ArgParser.class);
 
     private static final String USAGE_COMMAND = String.format("java -jar %s.jar", PROPS_FILE);
-    private static final String USAGE_COMMAND_PARAMETER = String.format("java -Dfoo.bar=<value> -jar %s.jar", PROPS_FILE);
-    private static final int DESCRIPTION_COLUMN = 35;
+    private static final int DESCRIPTION_COLUMN = 30;
     private static final int INDENT_SIZE = 2;
 
     private List<String> args;
@@ -61,13 +58,6 @@ public class ArgParser {
     public ArgParser(String[] args) {
         this.exitStatus = SUCCESS;
         this.args = new ArrayList<>(Arrays.asList(args));
-
-        // Apple grossly allows adding weird flags
-        // This can be removed when it's removed from unix-launcher.sh.in
-        if(this.args.size() > 2 && this.args.get(0).startsWith("-NS")) {
-            this.args.remove(0);
-            this.args.remove(0);
-        }
     }
     public List<String> getArgs() {
         return args;
@@ -84,10 +74,8 @@ public class ArgParser {
      */
     private boolean hasFlag(String ... matches) {
         for(String match : matches) {
-            for(String arg : args) {
-                if(match.equals(arg)) {
-                    return true;
-                }
+            if (args.contains(match)) {
+                return true;
             }
         }
         return false;
@@ -111,22 +99,6 @@ public class ArgParser {
 
     public boolean hasFlag(ArgValueOption argValueOption) {
         return hasFlag(argValueOption.getMatches());
-    }
-
-    /**
-     * Allows a pattern such as "--arg%d" to look for "--arg1", "--arg2" in succession
-     */
-    private String[] valuesOpt(String pattern) throws MissingArgException {
-        List<String> all = new LinkedList<>();
-        int argCounter = 0;
-        while(true) {
-            String found = valueOpt(String.format(pattern, ++argCounter));
-            if(found == null) {
-                break;
-            }
-            all.add(found);
-        }
-        return all.toArray(new String[all.size()]);
     }
 
     private String valueOf(String ... matches) throws MissingArgException {
@@ -154,7 +126,6 @@ public class ArgParser {
                         return val;
                     }
                 }
-                // FIXME: This doesn't fire when one might expect it to, but fixing it may cause regressions
                 if(!optional) {
                     throw new MissingArgException();
                 }
@@ -232,7 +203,7 @@ public class ArgParser {
                     throw new UnsupportedOperationException("Installation type " + argValue + " is not yet supported");
             }
         } catch(MissingArgException e) {
-            log.error("Valid usage:{}   {} {}", System.lineSeparator(), USAGE_COMMAND, argValue.getUsage());
+            log.error("Valid usage:\n   {} {}", USAGE_COMMAND, argValue.getUsage());
             return USAGE_ERROR;
         } catch(Exception e) {
             log.error("Installation step {} failed", argValue, e);
@@ -254,35 +225,11 @@ public class ArgParser {
                             valueOpt("--targetjdk", "-j")
                     );
                     return SUCCESS;
-                case PROVISION:
-                    ProvisionBuilder provisionBuilder;
-
-                    String jsonParam = valueOpt("--json");
-                    if(jsonParam != null) {
-                        // Process JSON provision file (overwrites existing provisions)
-                        provisionBuilder = new ProvisionBuilder(new File(jsonParam), valueOpt("--target-os"), valueOpt("--target-arch"));
-                        provisionBuilder.saveJson(true);
-                    } else {
-                        // Process single provision step (preserves existing provisions)
-                        provisionBuilder = new ProvisionBuilder(
-                                valueOf("--type"),
-                                valueOpt("--phase"),
-                                valueOpt("--os"),
-                                valueOpt("--arch"),
-                                valueOf("--data"),
-                                valueOpt("--args"),
-                                valueOpt("--description"),
-                                valuesOpt("--arg%d")
-                        );
-                        provisionBuilder.saveJson(false);
-                    }
-                    log.info("Successfully added provisioning step(s) {} to file '{}'", provisionBuilder.getJson(), ProvisionBuilder.BUILD_PROVISION_FILE);
-                    return SUCCESS;
                 default:
                     throw new UnsupportedOperationException("Build type " + argValue + " is not yet supported");
             }
         } catch(MissingArgException e) {
-            log.error("Valid usage:{}   {} {}", System.lineSeparator(), USAGE_COMMAND, argValue.getUsage());
+            log.error("Valid usage:\n   {} {}", USAGE_COMMAND, argValue.getUsage());
             return USAGE_ERROR;
         } catch(Exception e) {
             log.error("Build step {} failed", argValue, e);
@@ -318,15 +265,6 @@ public class ArgParser {
                 // Show generic help
                 for(ArgValue.ArgType argType : ArgValue.ArgType.values()) {
                     System.out.println(String.format("%s%s", System.lineSeparator(), argType));
-                    switch(argType) {
-                        case PREFERENCES:
-                            System.out.println(String.format("  Preferences can be set via \"%s %s=%s\", command line via \"%s\" or via file using %s.properties" + System.lineSeparator(),
-                                                             SystemUtilities.isWindows() ? "set" : "export",
-                                                             "QZ_OPTS",
-                                                             "-Dfoo.bar=<value>",
-                                                             USAGE_COMMAND_PARAMETER,
-                                                             PROPS_FILE));
-                    }
                     for(ArgValue argValue : ArgValue.filter(argType)) {
                         printHelp(argValue);
                     }
@@ -440,44 +378,11 @@ public class ArgParser {
         return false;
     }
 
-    private static ArrayList<String> collectPrefs() {
-        ArrayList<String> opts = new ArrayList<>();
-        for(Field f : Constants.class.getDeclaredFields()) {
-            if(f.getName().startsWith("PREFS_")) {
-                try {
-                    Object val = f.get(null);
-                    if (val instanceof String) {
-                        opts.add((String)val);
-                    }
-                } catch(Exception ignore) {}
-            }
-        }
-        return opts;
-    }
-
-    private static void printHelp(String[] commands, String description, String usage, Object defaultVal, int indent) {
+    private static void printHelp(String[] commands, String description, String usage, int indent) {
         String text = String.format("%s%s", StringUtils.leftPad("", indent), StringUtils.join(commands, ", "));
-
-        // Try to handle overflow
-        String[] overflow = null;
-        if((text.length() > 27 + indent) && text.contains(",")) {
-            String[] split = text.split(",");
-            text = split[0] + ",";
-            overflow = Arrays.copyOfRange(split, 1, split.length);
-        }
-
         if (description != null) {
             text = StringUtils.rightPad(text, DESCRIPTION_COLUMN) + description;
-            if(defaultVal != null) {
-               text += String.format(" [%s]", defaultVal);
-            }
-        }
 
-        if(overflow != null) {
-            for(int i = 0; i < overflow.length; i++) {
-                String ending = (i == overflow.length - 1) ? "" : ",";
-                text += System.lineSeparator() + StringUtils.leftPad("", indent + INDENT_SIZE)  + overflow[i].trim() + ending;
-            }
         }
         System.out.println(text);
         if (usage != null) {
@@ -486,10 +391,10 @@ public class ArgParser {
     }
 
     private static void printHelp(ArgValue argValue) {
-        printHelp(argValue.getMatches(), argValue.getDescription(), argValue.getUsage(), argValue.getDefaultVal(), INDENT_SIZE);
+        printHelp(argValue.getMatches(), argValue.getDescription(), argValue.getUsage(), INDENT_SIZE);
     }
 
     private static void printHelp(ArgValueOption argValueOption) {
-        printHelp(argValueOption.getMatches(), argValueOption.getDescription(), null, null, INDENT_SIZE);
+        printHelp(argValueOption.getMatches(), argValueOption.getDescription(), null, INDENT_SIZE);
     }
 }

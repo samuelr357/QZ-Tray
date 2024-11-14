@@ -91,13 +91,7 @@ public class UsbUtilities {
 
     public static UsbDevice findDevice(Short vendorId, Short productId) throws DeviceException {
         try {
-            UsbDevice device = findDevice(UsbHostManager.getUsbServices().getRootUsbHub(), vendorId, productId);
-            if(device == null) {
-                throw new DeviceException(String.format("Could not find USB device matching [ vendorId: '%s', productId: '%s' ]",
-                                                        "0x" + UsbUtil.toHexString(vendorId),
-                                                        "0x" + UsbUtil.toHexString(productId)));
-            }
-            return device;
+            return findDevice(UsbHostManager.getUsbServices().getRootUsbHub(), vendorId, productId);
         }
         catch(UsbException e) {
             throw new DeviceException(e);
@@ -154,15 +148,7 @@ public class UsbUtilities {
             throw new IllegalArgumentException("Device interface cannot be null");
         }
 
-        UsbInterface usbInterface = findDevice(vendorId, productId).getActiveUsbConfiguration().getUsbInterface(iface);
-        if(usbInterface != null) {
-            return usbInterface.getUsbEndpoints();
-        }
-        throw new DeviceException(String.format("Could not find USB interface matching [ vendorId: '%s', productId: '%s', interface: '%s' ]",
-                                                "0x" + UsbUtil.toHexString(vendorId),
-                                                "0x" + UsbUtil.toHexString(productId),
-                                                "0x" + UsbUtil.toHexString(iface)));
-
+        return findDevice(vendorId, productId).getActiveUsbConfiguration().getUsbInterface(iface).getUsbEndpoints();
     }
 
     public static JSONArray getInterfaceEndpointsJSON(DeviceOptions dOpts) throws DeviceException {

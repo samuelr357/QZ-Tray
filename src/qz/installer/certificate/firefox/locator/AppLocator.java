@@ -74,7 +74,7 @@ public abstract class AppLocator {
     }
 
     private static AppLocator getPlatformSpecificAppLocator() {
-        switch(SystemUtilities.getOs()) {
+        switch(SystemUtilities.getOsType()) {
             case WINDOWS:
                 return new WindowsAppLocator();
             case MAC:

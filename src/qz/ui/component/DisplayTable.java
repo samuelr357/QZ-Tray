@@ -1,9 +1,8 @@
 package qz.ui.component;
 
-import qz.utils.SystemUtilities;
-
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import java.awt.*;
 
 /**
  * Displays information in a JTable
@@ -28,12 +27,6 @@ public class DisplayTable extends JTable {
         };
         model.addColumn("Field");
         model.addColumn("Value");
-
-        // Fix Linux row height
-        int origHeight = getRowHeight();
-        if(SystemUtilities.getWindowScaleFactor() > 1) {
-            setRowHeight((int)(origHeight * SystemUtilities.getWindowScaleFactor()));
-        }
 
         getTableHeader().setReorderingAllowed(false);
         setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -62,11 +55,9 @@ public class DisplayTable extends JTable {
             model.addRow(new Object[columns]);
         }
 
-        setPreferredScrollableViewportSize(
-                SystemUtilities.scaleWindowDimension(
-                        getPreferredScrollableViewportSize().getWidth(),
-                        getPreferredSize().getHeight())
-        );
+        int normalWidth = (int)getPreferredScrollableViewportSize().getWidth();
+        int autoHeight = (int)getPreferredSize().getHeight();
+        setPreferredScrollableViewportSize(new Dimension(normalWidth, autoHeight));
         setFillsViewportHeight(true);
         refreshComponents();
     }

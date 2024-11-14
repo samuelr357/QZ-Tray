@@ -14,13 +14,10 @@ import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import qz.auth.Certificate;
-import qz.build.provision.params.Phase;
 import qz.installer.certificate.*;
 import qz.installer.certificate.firefox.FirefoxCertificateInstaller;
-import qz.installer.provision.ProvisionInstaller;
 import qz.utils.FileUtilities;
 import qz.utils.SystemUtilities;
-import qz.ws.WebsocketPorts;
 
 import java.io.*;
 import java.nio.file.*;
@@ -43,8 +40,6 @@ public abstract class Installer {
     public static boolean IS_SILENT =  "1".equals(System.getenv(DATA_DIR + "_silent"));
     public static String JRE_LOCATION = SystemUtilities.isMac() ? "Contents/PlugIns/Java.runtime/Contents/Home" : "runtime";
 
-    WebsocketPorts websocketPorts;
-
     public enum PrivilegeLevel {
         USER,
         SYSTEM
@@ -64,7 +59,7 @@ public abstract class Installer {
 
     public static Installer getInstance() {
         if(instance == null) {
-            switch(SystemUtilities.getOs()) {
+            switch(SystemUtilities.getOsType()) {
                 case WINDOWS:
                     instance = new WindowsInstaller();
                     break;
@@ -99,14 +94,12 @@ public abstract class Installer {
         getInstance();
         log.info("Installing to {}", instance.getDestination());
         instance.removeLibs()
-                .removeProvisioning()
                 .deployApp()
                 .removeLegacyStartup()
                 .removeLegacyFiles()
                 .addSharedDirectory()
                 .addAppLauncher()
                 .addStartupEntry()
-                .invokeProvisioning(Phase.INSTALL)
                 .addSystemSettings();
     }
 
@@ -117,8 +110,7 @@ public abstract class Installer {
         log.info("Uninstalling from {}", instance.getDestination());
         instance.removeSharedDirectory()
                 .removeSystemSettings()
-                .removeCerts()
-                .invokeProvisioning(Phase.UNINSTALL);
+                .removeCerts();
     }
 
     public Installer deployApp() throws IOException {
@@ -134,10 +126,7 @@ public abstract class Installer {
         // Note: preserveFileDate=false per https://github.com/qzind/tray/issues/1011
         FileUtils.copyDirectory(src.toFile(), dest.toFile(), false);
         FileUtilities.setPermissionsRecursively(dest, false);
-        // Fix permissions for provisioned files
-        FileUtilities.setExecutableRecursively(SystemUtilities.isMac() ?
-                                                       dest.resolve("Contents/Resources").resolve(PROVISION_DIR) :
-                                                       dest.resolve(PROVISION_DIR), false);
+
         if(!SystemUtilities.isWindows()) {
             setExecutable(SystemUtilities.isMac() ? "Contents/Resources/uninstall" : "uninstall");
             setExecutable(SystemUtilities.isMac() ? "Contents/MacOS/" + ABOUT_TITLE : PROPS_FILE);
@@ -181,30 +170,6 @@ public abstract class Installer {
         return this;
     }
 
-    public Installer cleanupLegacyLogs(int rolloverCount) {
-        // Convert old < 2.2.3 log file format
-        Path logLocation = USER_DIR;
-        int oldIndex = 0;
-        int newIndex = 0;
-        File oldFile;
-        do {
-            // Old: debug.log.1
-            oldFile = logLocation.resolve("debug.log." + ++oldIndex).toFile();
-            if(oldFile.exists()) {
-                // New: debug.1.log
-                File newFile;
-                do {
-                    newFile = logLocation.resolve("debug." + ++newIndex + ".log").toFile();
-                } while(newFile.exists());
-
-                oldFile.renameTo(newFile);
-                log.info("Migrated log file {} to new location {}", oldFile, newFile);
-            }
-        } while(oldFile.exists() || oldIndex <= rolloverCount);
-
-        return this;
-    }
-
     public Installer removeLegacyFiles() {
         ArrayList<String> dirs = new ArrayList<>();
         ArrayList<String> files = new ArrayList<>();
@@ -216,9 +181,6 @@ public abstract class Installer {
         dirs.add("auth");
         files.add("demo/js/qz-websocket.js");
         files.add("windows-icon.ico");
-
-        // QZ Tray 2.2.3-SNAPSHOT accidentally wrote certs in the wrong place
-        dirs.add("ssl");
 
         // QZ Tray 2.1 files
         if(SystemUtilities.isMac()) {
@@ -306,19 +268,11 @@ public abstract class Installer {
                         installer.install(caCert);
                         FirefoxCertificateInstaller.install(caCert, hostNames);
                     }
-                    if(!tempCert.delete()) {
-                        tempCert.deleteOnExit();
-                    }
                 }
             }
         }
         catch(Exception e) {
             log.error("Something went wrong obtaining the certificate.  HTTPS will fail.", e);
-        }
-
-        // Add provisioning steps that come after certgen
-        if(SystemUtilities.isAdmin()) {
-            invokeProvisioning(Phase.CERTGEN);
         }
 
         return certificateManager;
@@ -327,13 +281,12 @@ public abstract class Installer {
     /**
      * Remove matching certs from user|system, then Firefox
      */
-    public Installer removeCerts() {
+    public void removeCerts() {
         // System certs
         NativeCertificateInstaller instance = NativeCertificateInstaller.getInstance();
         instance.remove(instance.find());
         // Firefox certs
         FirefoxCertificateInstaller.uninstall();
-        return this;
     }
 
     /**
@@ -356,36 +309,6 @@ public abstract class Installer {
             }
         }
         return instance;
-    }
-
-    public Installer invokeProvisioning(Phase phase) {
-        try {
-            Path provisionPath = SystemUtilities.isMac() ?
-                    Paths.get(getDestination()).resolve("Contents/Resources").resolve(PROVISION_DIR) :
-                    Paths.get(getDestination()).resolve(PROVISION_DIR);
-            ProvisionInstaller provisionInstaller = new ProvisionInstaller(provisionPath);
-            provisionInstaller.invoke(phase);
-
-            // Special case for custom websocket ports
-            if(phase == Phase.INSTALL) {
-                    websocketPorts = WebsocketPorts.parseFromSteps(provisionInstaller.getSteps());
-            }
-        } catch(Exception e) {
-            log.warn("An error occurred invoking provision \"phase\": \"{}\"", phase, e);
-        }
-        return this;
-    }
-
-    public Installer removeProvisioning() {
-        try {
-            Path provisionPath = SystemUtilities.isMac() ?
-                    Paths.get(getDestination()).resolve("Contents/Resources").resolve(PROVISION_DIR) :
-                    Paths.get(getDestination()).resolve(PROVISION_DIR);
-            FileUtils.deleteDirectory(provisionPath.toFile());
-        } catch(Exception e) {
-            log.warn("An error occurred removing provision directory",  e);
-        }
-        return this;
     }
 
     public static Properties persistProperties(File oldFile, Properties newProps) {

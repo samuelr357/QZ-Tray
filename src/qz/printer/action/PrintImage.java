@@ -25,9 +25,7 @@ import qz.utils.SystemUtilities;
 import javax.imageio.IIOException;
 import javax.imageio.ImageIO;
 import javax.print.attribute.PrintRequestAttributeSet;
-import javax.print.attribute.ResolutionSyntax;
 import javax.print.attribute.standard.OrientationRequested;
-import javax.print.attribute.standard.PrinterResolution;
 import java.awt.*;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
@@ -40,6 +38,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 
 /**
@@ -82,7 +81,7 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
                     case PLAIN:
                         // There's really no such thing as a 'PLAIN' image, assume it's a URL
                     case FILE:
-                        bi = ImageIO.read(ConnectionUtilities.getInputStream(data.getString("data"), true));
+                        bi = ImageIO.read(ConnectionUtilities.getInputStream(data.getString("data")));
                         break;
                     default:
                         bi = ImageIO.read(new ByteArrayInputStream(flavor.read(data.getString("data"))));
@@ -105,40 +104,22 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
         log.debug("Parsed {} images for printing", images.size());
     }
 
-    private List<BufferedImage> breakupOverPages(BufferedImage img, PageFormat page, PrintRequestAttributeSet attributes) {
+    private List<BufferedImage> breakupOverPages(BufferedImage img, PageFormat page) {
         List<BufferedImage> splits = new ArrayList<>();
 
         Rectangle printBounds = new Rectangle(0, 0, (int)page.getImageableWidth(), (int)page.getImageableHeight());
-        PrinterResolution res = (PrinterResolution)attributes.get(PrinterResolution.class);
-        float dpi = res.getFeedResolution(1) / (float)ResolutionSyntax.DPI;
-        float cdpi = res.getCrossFeedResolution(1) / (float)ResolutionSyntax.DPI;
 
-        //printing uses 72dpi, convert so we can check split size correctly
-        int useWidth = (int)((img.getWidth() / cdpi) * 72);
-        int useHeight = (int)((img.getHeight() / dpi) * 72);
+        int columnsNeed = (int)Math.ceil(img.getWidth() / page.getImageableWidth());
+        int rowsNeed = (int)Math.ceil(img.getHeight() / page.getImageableHeight());
+        log.trace("Image to be printed across {} pages", columnsNeed * rowsNeed);
 
-        int columnsNeed = (int)Math.ceil(useWidth / page.getImageableWidth());
-        int rowsNeed = (int)Math.ceil(useHeight / page.getImageableHeight());
+        for(int row = 0; row < rowsNeed; row++) {
+            for(int col = 0; col < columnsNeed; col++) {
+                Rectangle clip = new Rectangle((col * printBounds.width), (row * printBounds.height), printBounds.width, printBounds.height);
+                if (clip.x + clip.width > img.getWidth()) { clip.width = img.getWidth() - clip.x; }
+                if (clip.y + clip.height > img.getHeight()) { clip.height = img.getHeight() - clip.y; }
 
-        if (columnsNeed == 1 && rowsNeed == 1) {
-            log.trace("Unscaled image does not need spit");
-            splits.add(img);
-        } else {
-            log.trace("Image to be printed across {} pages", columnsNeed * rowsNeed);
-            //allows us to split the image at the actual dpi instead of 72
-            float upscale = dpi / 72f;
-            float c_upscale = cdpi / 72f;
-
-            for(int row = 0; row < rowsNeed; row++) {
-                for(int col = 0; col < columnsNeed; col++) {
-                    Rectangle clip = new Rectangle((col * (int)(printBounds.width * c_upscale)), (row * (int)(printBounds.height * upscale)),
-                                                   (int)(printBounds.width * c_upscale), (int)(printBounds.height * upscale));
-
-                    if (clip.x + clip.width > img.getWidth()) { clip.width = img.getWidth() - clip.x; }
-                    if (clip.y + clip.height > img.getHeight()) { clip.height = img.getHeight() - clip.y; }
-
-                    splits.add(img.getSubimage(clip.x, clip.y, clip.width, clip.height));
-                }
+                splits.add(img.getSubimage(clip.x, clip.y, clip.width, clip.height));
             }
         }
 
@@ -175,7 +156,7 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
             //breakup large images to print across pages as needed
             List<BufferedImage> split = new ArrayList<>();
             for(BufferedImage bi : images) {
-                split.addAll(breakupOverPages(bi, page, attributes));
+                split.addAll(breakupOverPages(bi, page));
             }
             images = split;
         }
@@ -297,13 +278,8 @@ public class PrintImage extends PrintPixel implements PrintProcessor, Printable 
         int sWidth = image.getWidth(), sHeight = image.getHeight();
         int eWidth = (int)Math.floor((sWidth * cos) + (sHeight * sin)), eHeight = (int)Math.floor((sHeight * cos) + (sWidth * sin));
 
-        BufferedImage result;
-        if(!GraphicsEnvironment.isHeadless()) {
-            GraphicsConfiguration gc = GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()[0].getDefaultConfiguration();
-            result = gc.createCompatibleImage(eWidth, eHeight, Transparency.TRANSLUCENT);
-        } else {
-            result = new BufferedImage(eWidth, eHeight, Transparency.TRANSLUCENT);
-        }
+        GraphicsConfiguration gc = GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()[0].getDefaultConfiguration();
+        BufferedImage result = gc.createCompatibleImage(eWidth, eHeight, Transparency.TRANSLUCENT);
 
         Graphics2D g2d = result.createGraphics();
         g2d.setRenderingHints(buildRenderingHints(dithering, interpolation));

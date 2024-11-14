@@ -22,15 +22,9 @@ public class UsbIO implements DeviceIO {
         if (dOpts.getInterfaceId() == null) {
             throw new IllegalArgumentException("Device interface cannot be null");
         }
-        this.iface = device.getActiveUsbConfiguration().getUsbInterface(dOpts.getInterfaceId());
-        if (iface == null) {
-            throw new DeviceException(String.format("Could not find USB interface matching [ vendorId: '%s', productId: '%s', interface: '%s' ]",
-                                                    "0x" + UsbUtil.toHexString(dOpts.getVendorId()),
-                                                    "0x" + UsbUtil.toHexString(dOpts.getProductId()),
-                                                    "0x" + UsbUtil.toHexString(dOpts.getInterfaceId())));
-        }
-        this.device = device;
 
+        this.device = device;
+        this.iface = device.getActiveUsbConfiguration().getUsbInterface(dOpts.getInterfaceId());
     }
 
     public void open() throws DeviceException {
@@ -106,26 +100,19 @@ public class UsbIO implements DeviceIO {
      * @param endpoint Endpoint on the usb device interface to pass data across
      * @param data     Byte array of data to send, or to be written from a receive
      */
-    private synchronized void exchangeData(Byte endpoint, byte[] data) throws UsbException, DeviceException {
+    private synchronized void exchangeData(Byte endpoint, byte[] data) throws UsbException {
         if (endpoint == null) {
             throw new IllegalArgumentException("Interface endpoint cannot be null");
         }
 
-        UsbEndpoint usbEndpoint = iface.getUsbEndpoint(endpoint);
-        if(usbEndpoint == null) {
-            throw new DeviceException(String.format("Could not find USB endpoint matching [ endpoint: '%s' ]",
-                                                    "0x" + UsbUtil.toHexString(endpoint)));
-        }
-        UsbPipe pipe = usbEndpoint.getUsbPipe();
+        UsbPipe pipe = iface.getUsbEndpoint(endpoint).getUsbPipe();
         if (!pipe.isOpen()) { pipe.open(); }
 
         try {
             pipe.syncSubmit(data);
         }
         finally {
-            if(pipe != null) {
-                pipe.close();
-            }
+            pipe.close();
         }
     }
 

@@ -14,7 +14,7 @@ public class Constants {
     public static final String HEXES = "0123456789ABCDEF";
     public static final char[] HEXES_ARRAY = HEXES.toCharArray();
     public static final int BYTE_BUFFER_SIZE = 8192;
-    public static final Version VERSION = Version.valueOf("2.2.5-SNAPSHOT");
+    public static final Version VERSION = Version.valueOf("2.2.3-SNAPSHOT");
     public static final Version JAVA_VERSION = SystemUtilities.getJavaVersion();
     public static final String JAVA_VENDOR = System.getProperty("java.vendor");
 
@@ -28,6 +28,8 @@ public class Constants {
     public static final String[] PERSIST_PROPS = {"file.whitelist", "file.allow", "networking.hostname", "networking.port", STEAL_WEBSOCKET_PROPERTY };
     public static final String AUTOSTART_FILE = ".autostart";
     public static final String DATA_DIR = "qz";
+    public static final int LOG_SIZE = 524288;
+    public static final int LOG_ROTATIONS = 5;
 
     public static final int BORDER_PADDING = 10;
 
@@ -49,13 +51,21 @@ public class Constants {
     public static final boolean ENABLE_DIAGNOSTICS = true; // Diagnostics menu (logs, etc)
 
     public static final String TRUSTED_CERT = String.format("Verified by %s", Constants.ABOUT_COMPANY);
-    public static final String SPONSORED_CERT = String.format("Sponsored by %s", Constants.ABOUT_COMPANY);
-    public static final String SPONSORED_TOOLTIP = "Sponsored organization";
     public static final String UNTRUSTED_CERT = "Untrusted website";
     public static final String NO_TRUST = "Cannot verify trust";
 
     public static final String PROBE_REQUEST = "getProgramName";
     public static final String PROBE_RESPONSE = ABOUT_TITLE;
+
+    public static final String PREFS_NOTIFICATIONS = "tray.notifications";
+    public static final String PREFS_HEADLESS = "tray.headless";
+    public static final String PREFS_MONOCLE = "tray.monocle";
+    public static final String PREFS_STRICT_MODE = "tray.strictmode";
+    public static final String PREFS_IDLE_PRINTERS = "tray.idle.printers";
+    public static final String PREFS_IDLE_JFX = "tray.idle.javafx";
+
+    public static final String PREFS_FILEIO_ENABLED = "security.file.enabled";
+    public static final String PREFS_FILEIO_STRICT = "security.file.strict";
 
     public static final String ALLOW_SITES_TEXT = "Permanently allowed \"%s\" to access local resources";
     public static final String BLOCK_SITES_TEXT = "Permanently blocked \"%s\" from accessing local resources";
@@ -73,8 +83,6 @@ public class Constants {
 
     public static final String OVERRIDE_CERT = "override.crt";
     public static final String WHITELIST_CERT_DIR = "whitelist";
-    public static final String PROVISION_DIR = "provision";
-    public static final String PROVISION_FILE = "provision.json";
 
     public static final String SIGNING_PRIVATE_KEY = "private-key.pem";
     public static final String SIGNING_CERTIFICATE = "digital-certificate.txt";
@@ -97,7 +105,7 @@ public class Constants {
     public static final String PDF_PRINT = ABOUT_TITLE + " PDF Print";
     public static final String HTML_PRINT = ABOUT_TITLE + " HTML Print";
 
-    public static final Integer[] DEFAULT_WSS_PORTS = {8181, 8282, 8383, 8484};
-    public static final Integer[] DEFAULT_WS_PORTS = {8182, 8283, 8384, 8485};
+    public static final Integer[] WSS_PORTS = {8181, 8282, 8383, 8484};
+    public static final Integer[] WS_PORTS = {8182, 8283, 8384, 8485};
     public static final Integer[] CUPS_RSS_PORTS = {8586, 8687, 8788, 8889};
 }

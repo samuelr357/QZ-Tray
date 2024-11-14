@@ -24,7 +24,7 @@ public enum Platform implements Parsable {
     }
 
     public static Platform getCurrentPlatform() {
-        switch(SystemUtilities.getOs()) {
+        switch(SystemUtilities.getOsType()) {
             case MAC:
                 return Platform.MAC;
             case WINDOWS:

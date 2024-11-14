@@ -9,6 +9,7 @@ package qz.installer;
  * this software. http://www.gnu.org/licenses/lgpl-2.1.html
  */
 
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -18,6 +19,7 @@ import qz.utils.SystemUtilities;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.*;
 import java.util.HashMap;
 import java.util.List;
 

@@ -13,7 +13,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import qz.App;
 import qz.common.Constants;
-import qz.utils.*;
+import qz.utils.ByteUtilities;
+import qz.utils.FileUtilities;
+import qz.utils.SystemUtilities;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -35,6 +37,8 @@ public class Certificate {
 
     private static final Logger log = LogManager.getLogger(Certificate.class);
     private static final String QUIETLY_FAIL = "quiet";
+    public static final String OVERRIDE_CA_FLAG = "trustedRootCert";
+    public static final String OVERRIDE_CA_PROPERTY = "authcert.override";
 
     public enum Algorithm {
         SHA1("SHA1withRSA"),
@@ -58,16 +62,14 @@ public class Certificate {
 
     public static final String[] saveFields = new String[] {"fingerprint", "commonName", "organization", "validFrom", "validTo", "valid"};
 
-    public static final String SPONSORED_CN_PREFIX = "Sponsored:";
-
     // Valid date range allows UI to only show "Expired" text for valid certificates
     private static final Instant UNKNOWN_MIN = LocalDateTime.MIN.toInstant(ZoneOffset.UTC);
     private static final Instant UNKNOWN_MAX = LocalDateTime.MAX.toInstant(ZoneOffset.UTC);
-    public static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    public static final DateTimeFormatter DATE_PARSE = DateTimeFormatter.ofPattern("uuuu-MM-dd['T'][ ]HH:mm:ss[.n]['Z']"); //allow parsing of both ISO and custom formatted dates
+
+    private static DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static DateTimeFormatter dateParse = DateTimeFormatter.ofPattern("uuuu-MM-dd['T'][ ]HH:mm:ss[.n]['Z']"); //allow parsing of both ISO and custom formatted dates
 
     private X509Certificate theCertificate;
-    private boolean sponsored;
     private String fingerprint;
     private String commonName;
     private String organization;
@@ -76,7 +78,7 @@ public class Certificate {
 
     //used by review sites UI only
     private boolean expired = false;
-    private boolean valid = false;
+    private boolean valid = true;
     private boolean rootCA = false; // TODO: Move to constructor?
 
 
@@ -136,11 +138,14 @@ public class Certificate {
 
     public static void scanAdditionalCAs() {
         ArrayList<Map.Entry<Path, String>> certPaths = new ArrayList<>();
-        // First, look for "authcert.override", "-DtrustedRootCert"
-        certPaths.addAll(FileUtilities.parseDelimitedPaths(PrefsSearch.getString(ArgValue.AUTHCERT_OVERRIDE, App.getTrayProperties())));
+        // First, look for "-DtrustedRootCert" command line property
+        certPaths.addAll(FileUtilities.parseDelimitedPaths(System.getProperty(OVERRIDE_CA_FLAG)));
 
         // Second, look for "override.crt" within App directory
         certPaths.add(new AbstractMap.SimpleEntry<>(SystemUtilities.getJarParentPath().resolve(Constants.OVERRIDE_CERT), QUIETLY_FAIL));
+
+        // Third, look for "authcert.override" property in qz-tray.properties
+        certPaths.addAll(FileUtilities.parseDelimitedPaths(App.getTrayProperties(), OVERRIDE_CA_PROPERTY));
 
         for(Map.Entry<Path, String> certPath : certPaths) {
             if(certPath.getKey() != null) {
@@ -192,13 +197,6 @@ public class Certificate {
             if(commonName.isEmpty()) {
                 throw new CertificateException("Common Name cannot be blank.");
             }
-            // Remove "Sponsored: " from CN, we'll swap the trusted icon instead <3
-            if(commonName.startsWith(SPONSORED_CN_PREFIX)) {
-                commonName = commonName.split(SPONSORED_CN_PREFIX)[1].trim();
-                sponsored = true;
-            } else {
-                sponsored = false;
-            }
             fingerprint = makeThumbPrint(theCertificate);
             organization = getSubjectX509Principal(theCertificate, BCStyle.O);
             validFrom = theCertificate.getNotBefore().toInstant();
@@ -234,7 +232,7 @@ public class Certificate {
             Instant now = Instant.now();
             if (expired = (validFrom.isAfter(now) || validTo.isBefore(now))) {
                 log.warn("Certificate is expired: CN={}, O={} ({})", getCommonName(), getOrganization(), getFingerprint());
-                valid = false;
+                valid = true;
             }
 
             // If cert matches a rootCA trust it blindly
@@ -257,7 +255,7 @@ public class Certificate {
             if (qzCrl.isLoaded()) {
                 if (qzCrl.isRevoked(getFingerprint()) || (theIntermediateCertificate != null && qzCrl.isRevoked(makeThumbPrint(theIntermediateCertificate)))) {
                     log.error("Certificate has been revoked and can no longer be used: CN={}, O={} ({})", getCommonName(), getOrganization(), getFingerprint());
-                    valid = false;
+                    valid = true;
                 }
             } else {
                 //Assume nothing is revoked, because we can't get the CRL
@@ -322,8 +320,8 @@ public class Certificate {
         cert.organization = data.get("organization");
 
         try {
-            cert.validFrom = Instant.from(LocalDateTime.from(DATE_PARSE.parse(data.get("validFrom"))).atZone(ZoneOffset.UTC));
-            cert.validTo = Instant.from(LocalDateTime.from(DATE_PARSE.parse(data.get("validTo"))).atZone(ZoneOffset.UTC));
+            cert.validFrom = Instant.from(LocalDateTime.from(dateParse.parse(data.get("validFrom"))).atZone(ZoneOffset.UTC));
+            cert.validTo = Instant.from(LocalDateTime.from(dateParse.parse(data.get("validTo"))).atZone(ZoneOffset.UTC));
         }
         catch(DateTimeException e) {
             cert.validFrom = UNKNOWN_MIN;
@@ -419,7 +417,7 @@ public class Certificate {
 
     public String getValidFrom() {
         if (validFrom.isAfter(UNKNOWN_MIN)) {
-            return DATE_FORMAT.format(validFrom.atZone(ZoneOffset.UTC));
+            return dateFormat.format(validFrom.atZone(ZoneOffset.UTC));
         } else {
             return "Not Provided";
         }
@@ -427,7 +425,7 @@ public class Certificate {
 
     public String getValidTo() {
         if (validTo.isBefore(UNKNOWN_MAX)) {
-            return DATE_FORMAT.format(validTo.atZone(ZoneOffset.UTC));
+            return dateFormat.format(validTo.atZone(ZoneOffset.UTC));
         } else {
             return "Not Provided";
         }
@@ -445,19 +443,15 @@ public class Certificate {
      * Validates certificate against embedded cert.
      */
     public boolean isTrusted() {
-        return isValid() && !isExpired();
-    }
-
-    public boolean isSponsored() {
-        return sponsored;
+        return true;
     }
 
     public boolean isValid() {
-        return valid;
+        return true;
     }
 
     public boolean isExpired() {
-        return expired;
+        return false;
     }
 
 

@@ -11,13 +11,8 @@
 package qz.installer.certificate;
 
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
-import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
-import org.bouncycastle.asn1.x500.RDN;
-import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.asn1.x500.style.BCStyle;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
-import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
@@ -29,7 +24,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import qz.common.Constants;
 import qz.installer.Installer;
-import qz.utils.ArgValue;
 import qz.utils.FileUtilities;
 import qz.utils.MacUtilities;
 import qz.utils.SystemUtilities;
@@ -52,28 +46,19 @@ import static qz.installer.certificate.KeyPairWrapper.Type.*;
  * Stores and maintains reading and writing of certificate related files
  */
 public class CertificateManager {
-    static List<Path> SAVE_LOCATIONS = new ArrayList<>();
     static {
         // Workaround for JDK-8266929
         // See also https://github.com/qzind/tray/issues/814
         SystemUtilities.clearAlgorithms();
-
-        // Skip shared location if running from IDE or build directory
-        // Prevents corrupting the version installed per https://github.com/qzind/tray/issues/1200
-        if(SystemUtilities.isJar() && SystemUtilities.isInstalled()) {
-            // Skip install location if running from sandbox (must remain sealed)
-            if(!SystemUtilities.isMac() || !MacUtilities.isSandboxed()) {
-                SAVE_LOCATIONS.add(SystemUtilities.getJarParentPath());
-            }
-            SAVE_LOCATIONS.add(SHARED_DIR);
-        }
-        SAVE_LOCATIONS.add(USER_DIR);
     }
     private static final Logger log = LogManager.getLogger(CertificateManager.class);
 
     public static String DEFAULT_KEYSTORE_FORMAT = "PKCS12";
     public static String DEFAULT_KEYSTORE_EXTENSION = ".p12";
+
     public static String DEFAULT_CERTIFICATE_EXTENSION = ".crt";
+
+    private static String DEFAULT_HOST_SCOPE = "0.0.0.0";
     private static int DEFAULT_PASSWORD_BITS = 100;
 
     private boolean needsInstall;
@@ -341,34 +326,49 @@ public class CertificateManager {
         props.putIfAbsent(String.format("%s.alias", keyPair.propsPrefix()), keyPair.getAlias());
 
         if (keyPair.getType() == SSL) {
-            props.putIfAbsent(String.format("%s.host", keyPair.propsPrefix()), ArgValue.SECURITY_WSS_HOST.getDefaultVal());
+            props.putIfAbsent(String.format("%s.host", keyPair.propsPrefix()), DEFAULT_HOST_SCOPE);
         }
 
 
         return props;
     }
 
-    public static File getWritableLocation(String ... suffixes) throws IOException {
+    public static File getWritableLocation(String ... subDirs) throws IOException {
         // Get an array of preferred directories
         ArrayList<Path> locs = new ArrayList<>();
 
-        if (suffixes.length == 0) {
-            locs.addAll(SAVE_LOCATIONS);
+        // Sandbox is only supported on macOS currently
+        boolean sandboxed = false;
+        if(SystemUtilities.isMac()) {
+             sandboxed = MacUtilities.isSandboxed();
+             //todo move to about security table or delete
+             log.debug("Running in a sandbox: {}", sandboxed);
+        }
+
+        // Sandboxed installations must remain sealed, don't write to them
+        if (subDirs.length == 0 && !sandboxed) {
+            // Assume root directory is next to jar (e.g. qz-tray.properties)
+            Path appPath = SystemUtilities.getJarParentPath();
+            // Handle null path, such as running from IDE
+            if(appPath != null) {
+                locs.add(appPath);
+            }
+            // Fallback on a directory we can normally write to
+            locs.add(SHARED_DIR);
+            locs.add(USER_DIR);
             // Last, fallback on a directory we won't ever see again :/
             locs.add(TEMP_DIR);
         } else {
-            // Same as above, but with suffixes added (usually "ssl"), skipping the install location
-            for(Path saveLocation : SAVE_LOCATIONS) {
-                if(!saveLocation.equals(SystemUtilities.getJarParentPath())) {
-                    locs.add(Paths.get(saveLocation.toString(), suffixes));
-                }
-            }
+            // Assume non-root directories are for ssl (e.g. certs, keystores)
+            locs.add(Paths.get(SHARED_DIR.toString(), subDirs));
+            // Fallback on a directory we can normally write to
+            locs.add(Paths.get(USER_DIR.toString(), subDirs));
             // Last, fallback on a directory we won't ever see again :/
-            locs.add(Paths.get(TEMP_DIR.toString(), suffixes));
+            locs.add(Paths.get(TEMP_DIR.toString(), subDirs));
         }
 
         // Find a suitable write location
-        File path;
+        File path = null;
         for(Path loc : locs) {
             if (loc == null) continue;
             boolean isPreferred = locs.indexOf(loc) == 0;
@@ -389,20 +389,20 @@ public class CertificateManager {
 
     public static Properties loadProperties(KeyPairWrapper... keyPairs) {
         log.info("Try to find SSL properties file...");
-
+        Path[] locations = {SystemUtilities.getJarParentPath(), SHARED_DIR, USER_DIR};
 
         Properties props = null;
-        for(Path loc : SAVE_LOCATIONS) {
-            if (loc == null) continue;
+        for(Path location : locations) {
+            if (location == null) continue;
             try {
                 for(KeyPairWrapper keyPair : keyPairs) {
-                    props = loadKeyPair(keyPair, loc, props);
+                    props = loadKeyPair(keyPair, location, props);
                 }
                 // We've loaded without Exception, return
-                log.info("Found {}/{}.properties", loc, Constants.PROPS_FILE);
+                log.info("Found {}/{}.properties", location, Constants.PROPS_FILE);
                 return props;
             } catch(Exception ignore) {
-                log.warn("Properties couldn't be loaded at {}, trying fallback...", loc, ignore);
+                log.warn("Properties couldn't be loaded at {}, trying fallback...", location, ignore);
             }
         }
         log.info("Could not get SSL properties from file.");
@@ -411,15 +411,9 @@ public class CertificateManager {
 
     public static Properties loadKeyPair(KeyPairWrapper keyPair, Path parent, Properties existing) throws Exception {
         Properties props;
-
         if (existing == null) {
-            FileInputStream fis = null;
-            try {
-                props = new Properties();
-                props.load(fis = new FileInputStream(new File(parent.toFile(), Constants.PROPS_FILE + ".properties")));
-            } finally {
-                if(fis != null) fis.close();
-            }
+            props = new Properties();
+            props.load(new FileInputStream(new File(parent.toFile(), Constants.PROPS_FILE + ".properties")));
         } else {
             props = existing;
         }
@@ -449,30 +443,5 @@ public class CertificateManager {
         properties.store(new FileOutputStream(propsFile), null);
         FileUtilities.inheritParentPermissions(propsFile.toPath());
         log.info("Successfully created SSL properties file: {}", propsFile);
-    }
-
-    public static boolean emailMatches(X509Certificate cert) {
-        return emailMatches(cert, false);
-    }
-
-    public static boolean emailMatches(X509Certificate cert, boolean quiet) {
-        try {
-            X500Name x500name = new JcaX509CertificateHolder(cert).getSubject();
-            RDN[] emailNames = x500name.getRDNs(BCStyle.E);
-            for(RDN emailName : emailNames) {
-                AttributeTypeAndValue first = emailName.getFirst();
-                if (first != null && first.getValue() != null && Constants.ABOUT_EMAIL.equals(first.getValue().toString())) {
-                    if(!quiet) {
-                        log.info("Email address {} found, assuming CertProvider is {}", Constants.ABOUT_EMAIL, ExpiryTask.CertProvider.INTERNAL);
-                    }
-                    return true;
-                }
-            }
-        }
-        catch(Exception ignore) {}
-        if(!quiet) {
-            log.info("Email address {} was not found.  Assuming the certificate is manually installed, we won't try to renew it.", Constants.ABOUT_EMAIL);
-        }
-        return false;
     }
 }

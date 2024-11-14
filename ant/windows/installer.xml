@@ -16,8 +16,7 @@
             <include name="**/*.dll"/>
             <include name="**/*.exe"/>
         </fileset>
-        <!-- Place double quotes between files (sign-win adds surrounding quotes) -->
-        <pathconvert pathsep="&quot; &quot;" property="win.sign.separated" refid="win.sign.found"/>
+        <pathconvert pathsep=" " property="win.sign.separated" refid="win.sign.found"/>
         <antcall target="sign-win">
             <param name="sign.win.file" value="${win.sign.separated}"/>
         </antcall>
@@ -150,7 +149,7 @@
             <arg value="${signing.keypass}"/>
             <arg value="--tsaurl"/>
             <arg value="${signing.tsaurl}"/>
-            <arg line="&quot;${sign.win.file}&quot;"/>
+            <arg line="${sign.win.file}"/>
         </java>
     </target>
 
@@ -172,7 +171,7 @@
             <arg value="${signing.storepass}"/>
             <arg value="--keypass"/>
             <arg value="${signing.keypass}"/>
-            <arg line="&quot;${sign.win.file}&quot;"/>
+            <arg line="${sign.win.file}"/>
         </java>
     </target>
 </project>

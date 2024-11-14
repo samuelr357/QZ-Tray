@@ -18,11 +18,8 @@ import org.joor.Reflect;
 import org.joor.ReflectException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import qz.build.provision.params.Arch;
-import qz.build.provision.params.Os;
 import qz.common.Constants;
 import qz.common.TrayManager;
-import qz.installer.Installer;
 
 import javax.swing.*;
 import java.awt.*;
@@ -52,11 +49,9 @@ import java.util.TimeZone;
 public class SystemUtilities {
     static final String OS_NAME = System.getProperty("os.name");
     static final String OS_ARCH = System.getProperty("os.arch");
-    private static final Os OS_TYPE = Os.bestMatch(OS_NAME);
-    private static final Arch JRE_ARCH = Arch.bestMatch(OS_ARCH);
+    private static final OsType OS_TYPE = getOsType(OS_NAME);
+    private static final JreArch JRE_ARCH = getJreArch(OS_ARCH);
     private static final Logger log = LogManager.getLogger(TrayManager.class);
-
-    private static double windowScaleFactor = -1;
     private static final Locale defaultLocale = Locale.getDefault();
 
     static {
@@ -78,12 +73,71 @@ public class SystemUtilities {
     private static Path jarPath;
     private static Integer pid;
 
-    public static Os getOs() {
+    public enum OsType {
+        MAC,
+        WINDOWS,
+        LINUX,
+        SOLARIS,
+        UNKNOWN
+    }
+
+    public enum JreArch {
+        X86,
+        X86_64,
+        ARM, // 32-bit
+        AARCH64,
+        RISCV,
+        PPC,
+        UNKNOWN
+    }
+
+    public static OsType getOsType() {
         return OS_TYPE;
     }
 
-    public static Arch getArch() {
+    public static OsType getOsType(String os) {
+        if(os != null) {
+            String osLower = os.toLowerCase(Locale.ENGLISH);
+            if (osLower.contains("win")) {
+                return OsType.WINDOWS;
+            } else if (osLower.contains("mac")) {
+                return OsType.MAC;
+            } else if (osLower.contains("linux")) {
+                return OsType.LINUX;
+            } else if (osLower.contains("sunos")) {
+                return OsType.SOLARIS;
+            }
+        }
+        return OsType.UNKNOWN;
+    }
+
+    public static JreArch getJreArch() {
         return JRE_ARCH;
+    }
+
+    public static JreArch getJreArch(String arch) {
+        if(arch != null) {
+            String archLower = arch.toLowerCase(Locale.ENGLISH);
+            if (archLower.equals("arm")) {
+                return JreArch.ARM;
+            }
+            if (archLower.contains("amd64") || archLower.contains("x86_64")) {
+                return JreArch.X86_64;
+            }
+            if (archLower.contains("86")) { // x86, i386, i486, i586, i686
+                return JreArch.X86;
+            }
+            if (archLower.startsWith("aarch") || archLower.startsWith("arm")) {
+                return JreArch.AARCH64;
+            }
+            if (archLower.startsWith("riscv") || archLower.startsWith("rv")) {
+                return JreArch.RISCV;
+            }
+            if (archLower.startsWith("ppc") || archLower.startsWith("power")) {
+                return JreArch.PPC;
+            }
+        }
+        return JreArch.UNKNOWN;
     }
 
     /**
@@ -338,7 +392,7 @@ public class SystemUtilities {
      * @return {@code true} if Windows, {@code false} otherwise
      */
     public static boolean isWindows() {
-        return OS_TYPE == Os.WINDOWS;
+        return OS_TYPE == OsType.WINDOWS;
     }
 
     /**
@@ -347,7 +401,7 @@ public class SystemUtilities {
      * @return {@code true} if Mac OS, {@code false} otherwise
      */
     public static boolean isMac() {
-        return OS_TYPE == Os.MAC;
+        return OS_TYPE == OsType.MAC;
     }
 
     /**
@@ -356,7 +410,7 @@ public class SystemUtilities {
      * @return {@code true} if Linux, {@code false} otherwise
      */
     public static boolean isLinux() {
-        return OS_TYPE == Os.LINUX;
+        return OS_TYPE == OsType.LINUX;
     }
 
     /**
@@ -367,7 +421,7 @@ public class SystemUtilities {
     public static boolean isUnix() {
         if(OS_NAME != null) {
             String osLower = OS_NAME.toLowerCase(Locale.ENGLISH);
-            return OS_TYPE == Os.MAC || OS_TYPE == Os.SOLARIS || OS_TYPE == Os.LINUX ||
+            return OS_TYPE == OsType.MAC || OS_TYPE == OsType.SOLARIS || OS_TYPE == OsType.LINUX ||
                     osLower.contains("nix") || osLower.indexOf("aix") > 0;
         }
         return false;
@@ -379,7 +433,7 @@ public class SystemUtilities {
      * @return {@code true} if Solaris, {@code false} otherwise
      */
     public static boolean isSolaris() {
-        return OS_TYPE == Os.SOLARIS;
+        return OS_TYPE == OsType.SOLARIS;
     }
 
     public static boolean isDarkTaskbar() {
@@ -436,10 +490,7 @@ public class SystemUtilities {
         return false;
     }
 
-    public static boolean setSystemLookAndFeel(boolean headless) {
-        if(headless) {
-            return false;
-        }
+    public static boolean setSystemLookAndFeel() {
         try {
             UIManager.getDefaults().put("Button.showMnemonics", Boolean.TRUE);
             boolean darculaThemeNeeded = true;
@@ -475,7 +526,7 @@ public class SystemUtilities {
         }
 
         //adjust for dpi scaling
-        double dpiScale = getWindowScaleFactor(true);
+        double dpiScale = getWindowScaleFactor();
         if (dpiScale == 0) {
             log.debug("Invalid window scale value: {}, we'll center on the primary monitor instead", dpiScale);
             dialog.setLocationRelativeTo(null);
@@ -519,40 +570,21 @@ public class SystemUtilities {
      * See issues #284, #448
      * @return Logical dpi scale as dpi/96
      */
-    private static double getWindowScaleFactor(boolean forceRefresh) {
-        if(windowScaleFactor == -1 || forceRefresh) {
-            // MacOS is always 1
-            if (isMac()) {
-                return windowScaleFactor = 1;
-            }
-            // Windows/Linux on JDK8 honors scaling
-            if (Constants.JAVA_VERSION.lessThan(Version.valueOf("11.0.0"))) {
-                return windowScaleFactor = Toolkit.getDefaultToolkit().getScreenResolution() / 96.0;
-            }
-            // Windows on JDK11 is always 1
-            if (isWindows()) {
-                return windowScaleFactor = 1;
-            }
-            // Linux/Unix on JDK11 requires JNA calls to Gdk
-            return windowScaleFactor = UnixUtilities.getScaleFactor();
-        }
-        return windowScaleFactor;
-    }
-
     public static double getWindowScaleFactor() {
-        return getWindowScaleFactor(false);
-    }
-
-    public static Dimension scaleWindowDimension(Dimension orig) {
-        return scaleWindowDimension(orig.getWidth(), orig.getHeight());
-    }
-
-    public static Dimension scaleWindowDimension(double width, double height) {
-        double scaleFactor = getWindowScaleFactor();
-        return new Dimension(
-                (int)(width * scaleFactor),
-                (int)(height * scaleFactor)
-        );
+        // MacOS is always 1
+        if (isMac()) {
+            return 1;
+        }
+        // Windows/Linux on JDK8 honors scaling
+        if (Constants.JAVA_VERSION.lessThan(Version.valueOf("11.0.0"))) {
+            return Toolkit.getDefaultToolkit().getScreenResolution() / 96.0;
+        }
+        // Windows on JDK11 is always 1
+        if(isWindows()) {
+            return 1;
+        }
+        // Linux/Unix on JDK11 requires JNA calls to Gdk
+        return UnixUtilities.getScaleFactor();
     }
 
     /**
@@ -741,26 +773,12 @@ public class SystemUtilities {
     }
 
     private static long calculateChallenge() {
-        Path jarPath;
-        if(SystemUtilities.isJar()) {
-            jarPath = getJarPath();
-        } else {
-            // Running from IDE: Try to guess .jar location
-            if(SystemUtilities.isMac()) {
-                // 2.2+
-                jarPath = Paths.get(Installer.getInstance().getDestination(), "Contents", "Resources", Constants.PROPS_FILE + ".jar");
-                if(!jarPath.toFile().exists()) {
-                    // 2.1
-                    jarPath = Paths.get(Installer.getInstance().getDestination(), Constants.PROPS_FILE + ".jar");
-                }
-            } else {
-                jarPath = Paths.get(Installer.getInstance().getDestination(), Constants.PROPS_FILE + ".jar");
+        if(getJarPath() != null) {
+            if (getJarPath().toFile().exists()) {
+                return getJarPath().toFile().lastModified();
             }
         }
-        if (jarPath.toFile().exists()) {
-            return jarPath.toFile().lastModified();
-        }
-        return -1L; // Fallback
+        return -1L; // Fallback when running from IDE
     }
 
     /**
@@ -793,7 +811,7 @@ public class SystemUtilities {
      */
     public static boolean isSystemTraySupported(boolean headless) {
         if(!headless) {
-            switch(getOs()) {
+            switch(getOsType()) {
                 case WINDOWS:
                     if(WindowsUtilities.isHiddenSystemTray()) {
                         return false;

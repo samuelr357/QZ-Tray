@@ -36,6 +36,7 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -50,7 +51,6 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
     private double docWidth = 0;
     private double docHeight = 0;
     private boolean ignoreTransparency = false;
-    private boolean altFontRendering = false;
 
 
     public PrintPDF() {
@@ -83,7 +83,6 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                 }
 
                 ignoreTransparency = dataOpt.optBoolean("ignoreTransparency", false);
-                altFontRendering = dataOpt.optBoolean("altFontRendering", false);
 
                 if (!dataOpt.isNull("pageRanges")) {
                     String[] ranges = dataOpt.optString("pageRanges", "").split(",");
@@ -118,7 +117,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                     case PLAIN:
                         // There's really no such thing as a 'PLAIN' PDF, assume it's a URL
                     case FILE:
-                        doc = PDDocument.load(ConnectionUtilities.getInputStream(data.getString("data"), true));
+                        doc = PDDocument.load(ConnectionUtilities.getInputStream(data.getString("data")));
                         break;
                     default:
                         doc = PDDocument.load(new ByteArrayInputStream(flavor.read(data.getString("data"))));
@@ -253,7 +252,7 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
                 }
             }
 
-            PDFWrapper wrapper = new PDFWrapper(doc, scale, false, ignoreTransparency, altFontRendering,
+            PDFWrapper wrapper = new PDFWrapper(doc, scale, false, ignoreTransparency,
                                                 (float)(useDensity * pxlOpts.getUnits().as1Inch()),
                                                 false, pxlOpts.getOrientation(), hints);
 
@@ -321,6 +320,5 @@ public class PrintPDF extends PrintPixel implements PrintProcessor {
         docWidth = 0;
         docHeight = 0;
         ignoreTransparency = false;
-        altFontRendering = false;
     }
 }

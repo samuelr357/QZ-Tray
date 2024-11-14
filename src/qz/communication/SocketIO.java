@@ -6,7 +6,6 @@ import org.codehaus.jettison.json.JSONObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import qz.utils.DeviceUtilities;
-import qz.utils.NetworkUtilities;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -35,7 +34,6 @@ public class SocketIO {
 
     public boolean open() throws IOException {
         socket = new Socket(host, port);
-        socket.setSoTimeout(NetworkUtilities.SOCKET_TIMEOUT);
         dataOut = new DataOutputStream(socket.getOutputStream());
         dataIn = new DataInputStream(socket.getInputStream());
 
@@ -62,10 +60,8 @@ public class SocketIO {
             }
         }
         while(dataIn.available() > 0);
-        if(fullResponse.size() > 0) {
-            return new String(ArrayUtils.toPrimitive(fullResponse.toArray(new Byte[0])), encoding);
-        }
-        return null;
+
+        return new String(ArrayUtils.toPrimitive(fullResponse.toArray(new Byte[0])), encoding);
     }
 
     public void close() throws IOException {

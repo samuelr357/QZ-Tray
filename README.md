@@ -5,6 +5,17 @@ QZ Tray
 
 Browser plugin for sending documents and raw commands to a printer or attached device
 
+### BUILD ###
+### Windows 
+
+ant nsis
+
+### Linux
+
+sudo apt install ant makeself
+
+ant makeself
+
 ## Getting Started
   * Download here https://qz.io/download/
   * See our [Getting Started](../../wiki/getting-started) guide.

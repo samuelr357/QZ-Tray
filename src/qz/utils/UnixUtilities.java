@@ -19,9 +19,7 @@ import org.apache.logging.log4j.Logger;
 import qz.common.Constants;
 
 import java.awt.*;
-import java.io.BufferedReader;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.Arrays;
@@ -98,11 +96,11 @@ public class UnixUtilities {
                 Map<String,String> map = getReleaseMap();
                 for (String nameKey: OS_NAME_KEYS) {
                     if (map.containsKey(nameKey)) {
-                        unixRelease = map.get(nameKey);
+                        unixRelease = UnixUtilities.getReleaseMap().get(nameKey);
                         break;
                     }
                 }
-            } catch(IOException e) {
+            } catch(FileNotFoundException e) {
                 log.warn("Could not find a suitable os-release file {}", Arrays.toString(OS_RELEASE_FILES));
             }
             if(unixRelease == null) {
@@ -122,12 +120,12 @@ public class UnixUtilities {
                 Map<String,String> map = getReleaseMap();
                 for(String versionKey : OS_VERSION_KEYS) {
                     if (map.containsKey(versionKey)) {
-                        unixVersion = map.get(versionKey);
+                        unixVersion = UnixUtilities.getReleaseMap().get(versionKey);
                         break;
                     }
                 }
             }
-            catch(IOException e) {
+            catch(FileNotFoundException e) {
                 log.warn("Could not find a suitable os-release file {}", Arrays.toString(OS_RELEASE_FILES));
             }
             if(unixVersion == null) {
@@ -144,22 +142,18 @@ public class UnixUtilities {
         return unixVersion;
     }
 
-    private static Map<String, String> getReleaseMap() throws IOException {
+    private static Map<String, String> getReleaseMap() throws FileNotFoundException {
         HashMap<String,String> map = new HashMap<>();
-        BufferedReader reader = null;
-        try {
-            Path release = findOsReleaseFile();
-            reader = new BufferedReader(new FileReader(release.toFile()));
-            String line;
-            while((line = reader.readLine()) != null) {
-                String[] tokens = line.split("=", 2);
-                if (tokens.length != 2) continue;
-                map.put(tokens[0], tokens[1].replaceAll("\"", ""));
-            }
-        } finally{
-            if(reader != null) {
-                reader.close();
-            }
+        Path release = findOsReleaseFile();
+        String result = ShellUtilities.executeRaw(
+                new String[] {"cat", release.toString()}
+        );
+
+        String[] results = result.split("\n");
+        for (String line: results) {
+            String[] tokens = line.split("=", 2);
+            if (tokens.length != 2) continue;
+            map.put(tokens[0], tokens[1].replaceAll("\"", ""));
         }
         return map;
     }
@@ -243,19 +237,6 @@ public class UnixUtilities {
         return uname != null && uname.contains("Ubuntu");
     }
 
-    /**
-     * Returns whether the output of {@code uname -a} shell command contains "Debian"
-     *
-     * @return {@code true} if this OS is Debian
-     */
-    public static boolean isDebian() {
-        if(!SystemUtilities.isLinux()) {
-            return false;
-        }
-        getUname();
-        return uname != null && uname.contains("Debian");
-    }
-
 
     /**
      * Returns whether the output of <code>cat /etc/redhat-release/code> shell command contains "Fedora"
@@ -264,6 +245,6 @@ public class UnixUtilities {
      */
     public static boolean isFedora() {
         if(!SystemUtilities.isLinux()) return false;
-        return getOsDisplayName() != null && getOsDisplayName().contains("Fedora");
+        return unixRelease != null && getOsDisplayName().contains("Fedora");
     }
 }

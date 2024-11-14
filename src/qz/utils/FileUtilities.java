@@ -10,7 +10,6 @@
 package qz.utils;
 
 import org.apache.commons.io.Charsets;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.text.translate.CharSequenceTranslator;
 import org.apache.commons.lang3.text.translate.LookupTranslator;
@@ -33,7 +32,6 @@ import qz.communication.FileParams;
 import qz.exception.NullCommandException;
 import qz.installer.WindowsSpecialFolders;
 import qz.installer.certificate.CertificateManager;
-import qz.installer.provision.ProvisionInstaller;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -48,7 +46,7 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import static qz.common.Constants.*;
+import static qz.common.Constants.ALLOW_FILE;
 
 /**
  * Common static file i/o utilities
@@ -593,7 +591,7 @@ public class FileUtilities {
     }
 
     public static byte[] readRawFile(String url) throws IOException {
-        return readFile(new DataInputStream(ConnectionUtilities.getInputStream(url, true)));
+        return readFile(new DataInputStream(ConnectionUtilities.getInputStream(url)));
     }
 
     private static byte[] readFile(DataInputStream in) throws IOException {
@@ -850,9 +848,9 @@ public class FileUtilities {
         configureAssetFile(relativeAsset, dest.toFile(), additionalMappings, relativeClass);
     }
 
-    private static Path getTempDirectory() {
+    public static Path getTempDirectory() {
         try {
-            return Files.createTempDirectory(Constants.DATA_DIR + "_data_");
+            return Files.createTempDirectory(Constants.DATA_DIR);
         } catch(IOException e) {
             log.warn("We couldn't get a temp directory for writing.  This could cause some items to break");
         }
@@ -891,35 +889,6 @@ public class FileUtilities {
             });
         } catch (IOException e) {
             log.warn("An error occurred setting permissions: {}", toRecurse);
-        }
-    }
-
-    public static void setExecutableRecursively(Path toRecurse, boolean ownerOnly) {
-        File folder = toRecurse.toFile();
-        if(SystemUtilities.isWindows() || !folder.exists() || !folder.isDirectory()) {
-            return;
-        }
-
-        // "provision.json" found, assume we're in the provisioning directory, only process scripts and installers
-        boolean isProvision = toRecurse.resolve(PROVISION_FILE).toFile().exists();
-
-        try (Stream<Path> paths = Files.walk(toRecurse)) {
-            paths.forEach((path)->{
-                if (path.toFile().isDirectory()) {
-                    // Executable bit in Unix allows listing files
-                    path.toFile().setExecutable(true, ownerOnly);
-                } else if(!isProvision || ProvisionInstaller.shouldBeExecutable(path)) {
-                    path.toFile().setExecutable(true, ownerOnly);
-                }
-            });
-        } catch (IOException e) {
-            log.warn("An error occurred setting permissions: {}", toRecurse);
-        }
-    }
-
-    public static void cleanup() {
-        if(FileUtilities.TEMP_DIR != null) {
-            FileUtils.deleteQuietly(FileUtilities.TEMP_DIR.toFile());
         }
     }
 }

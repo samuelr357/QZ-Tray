@@ -26,8 +26,6 @@ import qz.ui.tray.TrayType;
 import qz.utils.*;
 import qz.ws.PrintSocketServer;
 import qz.ws.SingleInstanceChecker;
-import qz.ws.WebsocketPorts;
-import qz.ws.substitutions.Substitutions;
 
 import javax.swing.*;
 import java.awt.*;
@@ -41,7 +39,6 @@ import java.util.TimerTask;
 import java.util.concurrent.TimeUnit;
 
 import static qz.ui.component.IconCache.Icon.*;
-import static qz.utils.ArgValue.*;
 
 /**
  * Manages the icons and actions associated with the TrayIcon
@@ -98,17 +95,14 @@ public class TrayManager {
         prefs = new PropertyHelper(FileUtilities.USER_DIR + File.separator + Constants.PREFS_FILE + ".properties");
 
         // Set strict certificate mode preference
-        Certificate.setTrustBuiltIn(!getPref(TRAY_STRICTMODE));
-
-        // Configures JSON websocket messages
-        Substitutions.getInstance();
+        Certificate.setTrustBuiltIn(!getPref(Constants.PREFS_STRICT_MODE, false));
 
         // Set FileIO security
-        FileUtilities.setFileIoEnabled(getPref(SECURITY_FILE_ENABLED));
-        FileUtilities.setFileIoStrict(getPref(SECURITY_FILE_STRICT));
+        FileUtilities.setFileIoEnabled(getPref(Constants.PREFS_FILEIO_ENABLED, true));
+        FileUtilities.setFileIoStrict(getPref(Constants.PREFS_FILEIO_STRICT, false));
 
         // Headless if turned on by user or unsupported by environment
-        headless = isHeadless || getPref(HEADLESS) || GraphicsEnvironment.isHeadless();
+        headless = isHeadless || getPref(Constants.PREFS_HEADLESS, false) || GraphicsEnvironment.isHeadless();
         if (headless) {
             log.info("Running in headless mode");
         }
@@ -116,11 +110,11 @@ public class TrayManager {
         // Set up the shortcut name so that the UI components can use it
         shortcutCreator = ShortcutCreator.getInstance();
 
-        SystemUtilities.setSystemLookAndFeel(headless);
+        SystemUtilities.setSystemLookAndFeel();
         iconCache = new IconCache();
 
         if (SystemUtilities.isSystemTraySupported(headless)) { // UI mode with tray
-            switch(SystemUtilities.getOs()) {
+            switch(SystemUtilities.getOsType()) {
                 case WINDOWS:
                     tray = TrayType.JX.init(iconCache);
                     // Undocumented HiDPI behavior
@@ -187,7 +181,7 @@ public class TrayManager {
                             iconCache.fixTrayIcons(darkTaskbarMode);
                             refreshIcon(null);
                             SwingUtilities.invokeLater(() -> {
-                                SystemUtilities.setSystemLookAndFeel(headless);
+                                SystemUtilities.setSystemLookAndFeel();
                                 for(Component c : componentList) {
                                     SwingUtilities.updateComponentTreeUI(c);
                                     if (c instanceof Themeable) {
@@ -213,7 +207,7 @@ public class TrayManager {
 
         // Initialize idle actions
         // Slow to start JavaFX the first time
-        if (getPref(TRAY_IDLE_JAVAFX)) {
+        if (getPref(Constants.PREFS_IDLE_JFX, true)) {
             performIfIdle((int)TimeUnit.SECONDS.toMillis(60), evt -> {
                 log.debug("IDLE: Starting up JFX for HTML printing");
                 try {
@@ -226,7 +220,7 @@ public class TrayManager {
         }
         // Slow to find printers the first time if a lot of printers are installed
         // Must run after JavaFX per https://github.com/qzind/tray/issues/924
-        if (getPref(TRAY_IDLE_PRINTERS)) {
+        if (getPref(Constants.PREFS_IDLE_PRINTERS, true)) {
             performIfIdle((int)TimeUnit.SECONDS.toMillis(120), evt -> {
                 log.debug("IDLE: Performing first run of find printers");
                 PrintServiceMatcher.getNativePrinterList(false, true);
@@ -285,14 +279,14 @@ public class TrayManager {
         JCheckBoxMenuItem notificationsItem = new JCheckBoxMenuItem("Show all notifications");
         notificationsItem.setToolTipText("Shows all connect/disconnect messages, useful for debugging purposes");
         notificationsItem.setMnemonic(KeyEvent.VK_S);
-        notificationsItem.setState(getPref(TRAY_NOTIFICATIONS));
+        notificationsItem.setState(getPref(Constants.PREFS_NOTIFICATIONS, false));
         notificationsItem.addActionListener(notificationsListener);
         diagnosticMenu.add(notificationsItem);
 
         JCheckBoxMenuItem monocleItem = new JCheckBoxMenuItem("Use Monocle for HTML");
         monocleItem.setToolTipText("Use monocle platform for HTML printing (restart required)");
         monocleItem.setMnemonic(KeyEvent.VK_U);
-        monocleItem.setState(getPref(TRAY_MONOCLE));
+        monocleItem.setState(getPref(Constants.PREFS_MONOCLE, true));
         if(!SystemUtilities.hasMonocle()) {
             log.warn("Monocle engine was not detected");
             monocleItem.setEnabled(false);
@@ -384,7 +378,7 @@ public class TrayManager {
     private final ActionListener notificationsListener = new ActionListener() {
         @Override
         public void actionPerformed(ActionEvent e) {
-            prefs.setProperty(TRAY_NOTIFICATIONS, ((JCheckBoxMenuItem)e.getSource()).getState());
+            prefs.setProperty(Constants.PREFS_NOTIFICATIONS, ((JCheckBoxMenuItem)e.getSource()).getState());
         }
     };
 
@@ -392,7 +386,7 @@ public class TrayManager {
         @Override
         public void actionPerformed(ActionEvent e) {
             JCheckBoxMenuItem j = (JCheckBoxMenuItem)e.getSource();
-            prefs.setProperty(TRAY_MONOCLE, j.getState());
+            prefs.setProperty(Constants.PREFS_MONOCLE, j.getState());
             displayWarningMessage(String.format("A restart of %s is required to ensure this feature is %sabled.",
                                                 Constants.ABOUT_TITLE, j.getState()? "en":"dis"));
         }
@@ -476,14 +470,13 @@ public class TrayManager {
 
     private final ActionListener exitListener = new ActionListener() {
         public void actionPerformed(ActionEvent e) {
-            boolean showAllNotifications = getPref(TRAY_NOTIFICATIONS);
+            boolean showAllNotifications = getPref(Constants.PREFS_NOTIFICATIONS, false);
             if (!showAllNotifications || confirmDialog.prompt("Exit " + name + "?")) { exit(0); }
         }
     };
 
     public void exit(int returnCode) {
         prefs.save();
-        FileUtilities.cleanup();
         System.exit(returnCode);
     }
 
@@ -539,9 +532,9 @@ public class TrayManager {
         }
     }
 
-    public void setServer(Server server, WebsocketPorts websocketPorts) {
+    public void setServer(Server server, int insecurePortIndex) {
         if (server != null && server.getConnectors().length > 0) {
-            singleInstanceCheck(websocketPorts);
+            singleInstanceCheck(PrintSocketServer.INSECURE_PORTS, insecurePortIndex);
 
             displayInfoMessage("Server started on port(s) " + PrintSocketServer.getPorts(server));
 
@@ -626,7 +619,7 @@ public class TrayManager {
         if (!headless) {
             if (tray != null) {
                 SwingUtilities.invokeLater(() -> {
-                    boolean showAllNotifications = getPref(TRAY_NOTIFICATIONS);
+                    boolean showAllNotifications = getPref(Constants.PREFS_NOTIFICATIONS, false);
                     if (showAllNotifications || level != TrayIcon.MessageType.INFO) {
                         tray.displayMessage(caption, text, level);
                     }
@@ -637,19 +630,16 @@ public class TrayManager {
         }
     }
 
-    public void singleInstanceCheck(WebsocketPorts websocketPorts) {
-        // Secure
-        for(int port : websocketPorts.getUnusedSecurePorts()) {
-            new SingleInstanceChecker(this, port, true);
-        }
-        // Insecure
-        for(int port : websocketPorts.getUnusedInsecurePorts()) {
-            new SingleInstanceChecker(this, port, false);
+    public void singleInstanceCheck(java.util.List<Integer> insecurePorts, Integer insecurePortIndex) {
+        for(int port : insecurePorts) {
+            if (port != insecurePorts.get(insecurePortIndex)) {
+                new SingleInstanceChecker(this, port);
+            }
         }
     }
 
     public boolean isMonoclePreferred() {
-        return getPref(TRAY_MONOCLE);
+        return getPref(Constants.PREFS_MONOCLE, true);
     }
 
     public boolean isHeadless() {
@@ -659,8 +649,8 @@ public class TrayManager {
     /**
      * Get boolean user pref: Searching "user", "app" and <code>System.getProperty(...)</code>.
      */
-    private boolean getPref(ArgValue argValue) {
-        return PrefsSearch.getBoolean(argValue, prefs, App.getTrayProperties());
+    private boolean getPref(String name, boolean defaultVal) {
+        return "true".equalsIgnoreCase(PrefsSearch.get(prefs, App.getTrayProperties(), name, defaultVal + ""));
     }
 
     private void performIfIdle(int idleQualifier, ActionListener performer) {

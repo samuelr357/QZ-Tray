@@ -1,9 +1,8 @@
 'use strict';
 
 /**
- * @version 2.2.5-SNAPSHOT
+ * @version 2.2.3-SNAPSHOT
  * @overview QZ Tray Connector
- * @license LGPL-2.1-only
  * <p/>
  * Connects a web client to the QZ Tray software.
  * Enables printing and device communication from javascript.
@@ -27,7 +26,7 @@ var qz = (function() {
 ///// PRIVATE METHODS /////
 
     var _qz = {
-        VERSION: "2.2.5-SNAPSHOT",                              //must match @version above
+        VERSION: "2.2.3-SNAPSHOT",                              //must match @version above
         DEBUG: false,
 
         log: {
@@ -53,8 +52,6 @@ var qz = (function() {
         websocket: {
             /** The actual websocket object managing the connection. */
             connection: null,
-            /** Track if a connection attempt is being cancelled. */
-            shutdown: false,
 
             /** Default parameters used on new connections. Override values using options parameter on {@link qz.websocket.connect}. */
             connectConfig: {
@@ -78,11 +75,6 @@ var qz = (function() {
             setup: {
                 /** Loop through possible ports to open connection, sets web socket calls that will settle the promise. */
                 findConnection: function(config, resolve, reject) {
-                    if (_qz.websocket.shutdown) {
-                        reject(new Error("Connection attempt cancelled by user"));
-                        return;
-                    }
-
                     //force flag if missing ports
                     if (!config.port.secure.length) {
                         if (!config.port.insecure.length) {
@@ -98,12 +90,6 @@ var qz = (function() {
                     }
 
                     var deeper = function() {
-                        if (_qz.websocket.shutdown) {
-                            //connection attempt was cancelled, bail out
-                            reject(new Error("Connection attempt cancelled by user"));
-                            return;
-                        }
-
                         config.port.portIndex++;
 
                         if ((config.usingSecure && config.port.portIndex >= config.port.secure.length)
@@ -261,13 +247,6 @@ var qz = (function() {
 
                                     _qz.signContent = undefined;
                                     _qz.websocket.connection.send(_qz.tools.stringify(obj));
-                                }).catch(function(err) {
-                                    _qz.log.error("Signing failed", err);
-
-                                    if (obj.promise != undefined) {
-                                        obj.promise.reject(new Error("Failed to sign request"));
-                                        delete _qz.websocket.pendingCalls[obj.uid];
-                                    }
                                 });
                             } else {
                                 _qz.log.trace("Signature for call", obj.signature);
@@ -384,12 +363,7 @@ var qz = (function() {
 
                     _qz.security.callCert().then(sendCert).catch(function(error) {
                         _qz.log.warn("Failed to get certificate:", error);
-
-                        if (_qz.security.rejectOnCertFailure) {
-                            openPromise.reject(error);
-                        } else {
-                            sendCert(null);
-                        }
+                        sendCert(null);
                     });
                 },
 
@@ -605,8 +579,6 @@ var qz = (function() {
             /** Signing algorithm used on signatures */
             signAlgorithm: "SHA1",
 
-            rejectOnCertFailure: false,
-
             needsSigned: function(callName) {
                 const undialoged = [
                     "printers.getStatus",
@@ -697,7 +669,7 @@ var qz = (function() {
                     if (data[i].constructor === Object) {
                         var absolute = false;
 
-                        if (data[i].data && data[i].data.search && data[i].data.search(/data:image\/\w+;base64,/) === 0) {
+                        if (data[i].data && data[i].data.search(/data:image\/\w+;base64,/) === 0) {
                             //upgrade from old base64 behavior
                             data[i].flavor = "base64";
                             data[i].data = data[i].data.replace(/^data:image\/\w+;base64,/, "");
@@ -786,9 +758,7 @@ var qz = (function() {
             },
 
             isActive: function() {
-                return !_qz.websocket.shutdown && _qz.websocket.connection != null
-                    && (_qz.websocket.connection.readyState === _qz.tools.ws.OPEN
-                        || _qz.websocket.connection.readyState === _qz.tools.ws.CONNECTING);
+                return _qz.websocket.connection != null && _qz.websocket.connection.established;
             },
 
             assertActive: function() {
@@ -797,80 +767,12 @@ var qz = (function() {
                 }
                 // Promise won't reject on throw; yet better than 'undefined'
                 throw new Error("A connection to QZ has not been established yet");
-            },
-
-            uint8ArrayToHex: function(uint8) {
-                return Array.from(uint8)
-                    .map(function(i) { return i.toString(16).padStart(2, '0'); })
-                    .join('');
-            },
-
-            uint8ArrayToBase64: function(uint8) {
-                /**
-                 * Adapted from Egor Nepomnyaschih's code under MIT Licence (C) 2020
-                 * see https://gist.github.com/enepomnyaschih/72c423f727d395eeaa09697058238727
-                 */
-                var map = [
-                    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U",
-                    "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p",
-                    "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "+", "/"
-                ];
-
-                var result = '', i, l = uint8.length;
-                for (i = 2; i < l; i += 3) {
-                    result += map[uint8[i - 2] >> 2];
-                    result += map[((uint8[i - 2] & 0x03) << 4) | (uint8[i - 1] >> 4)];
-                    result += map[((uint8[i - 1] & 0x0F) << 2) | (uint8[i] >> 6)];
-                    result += map[uint8[i] & 0x3F];
-                }
-                if (i === l + 1) { // 1 octet yet to write
-                    result += map[uint8[i - 2] >> 2];
-                    result += map[(uint8[i - 2] & 0x03) << 4];
-                    result += "==";
-                }
-                if (i === l) { // 2 octets yet to write
-                    result += map[uint8[i - 2] >> 2];
-                    result += map[((uint8[i - 2] & 0x03) << 4) | (uint8[i - 1] >> 4)];
-                    result += map[(uint8[i - 1] & 0x0F) << 2];
-                    result += "=";
-                }
-                return result;
-            },
+            }
         },
 
         compatible: {
             /** Converts message format to a previous version's */
             data: function(printData) {
-                // special handling for Uint8Array
-                for(var i = 0; i < printData.length; i++) {
-                    if (printData[i].constructor === Object && printData[i].data instanceof Uint8Array) {
-                        if (printData[i].flavor) {
-                            var flavor = printData[i].flavor.toString().toUpperCase();
-                            switch(flavor) {
-                                case 'BASE64':
-                                    printData[i].data = _qz.tools.uint8ArrayToBase64(printData[i].data);
-                                    break;
-                                case 'HEX':
-                                    printData[i].data = _qz.tools.uint8ArrayToHex(printData[i].data);
-                                    break;
-                                default:
-                                    throw new Error("Uint8Array conversion to '" + flavor + "' is not supported.");
-                            }
-                        }
-                    }
-                }
-
-                if(_qz.tools.versionCompare(2, 2, 4) < 0) {
-                    for(var i = 0; i < printData.length; i++) {
-                        if (printData[i].constructor === Object) {
-                            // dotDensity: "double-legacy|single-legacy" since 2.2.4.  Fallback to "double|single"
-                            if (printData[i].options && typeof printData[i].options.dotDensity === 'string') {
-                                printData[i].options.dotDensity = printData[i].options.dotDensity.toLowerCase().replace("-legacy", "");
-                            }
-                        }
-                    }
-                }
-
                 if (_qz.tools.isVersion(2, 0)) {
                     /*
                     2.0.x conversion
@@ -963,8 +865,7 @@ var qz = (function() {
             /** Check if QZ version supports chosen algorithm */
             algorithm: function(quiet) {
                 //if not connected yet we will assume compatibility exists for the time being
-                //check semver to guard race condition for pending connections
-                if (_qz.tools.isActive() && _qz.websocket.connection.semver) {
+                if (_qz.tools.isActive()) {
                     if (_qz.tools.isVersion(2, 0)) {
                         if (!quiet) {
                             _qz.log.warn("Connected to an older version of QZ, alternate signature algorithms are not supported");
@@ -1094,6 +995,14 @@ var qz = (function() {
             if (typeof newPrinter === 'string') {
                 newPrinter = { name: newPrinter };
             }
+
+            if(newPrinter && newPrinter.file) {
+                // TODO: Warn for UNC paths too https://github.com/qzind/tray/issues/730
+                if(newPrinter.file.indexOf("\\\\") != 0) {
+                    _qz.log.warn("Printing to file is deprecated.  See https://github.com/qzind/tray/issues/730");
+                }
+            }
+
             this.printer = newPrinter;
         };
 
@@ -1191,19 +1100,12 @@ var qz = (function() {
              */
             connect: function(options) {
                 return _qz.tools.promise(function(resolve, reject) {
-                    if (_qz.websocket.connection) {
-                        const state = _qz.websocket.connection.readyState;
-
-                        if (state === _qz.tools.ws.OPEN) {
-                            reject(new Error("An open connection with QZ Tray already exists"));
-                            return;
-                        } else if (state === _qz.tools.ws.CONNECTING) {
-                            reject(new Error("The current connection attempt has not returned yet"));
-                            return;
-                        } else if (state === _qz.tools.ws.CLOSING) {
-                            reject(new Error("Waiting for previous disconnect request to complete"));
-                            return;
-                        }
+                    if (_qz.tools.isActive()) {
+                        reject(new Error("An open connection with QZ Tray already exists"));
+                        return;
+                    } else if (_qz.websocket.connection != null) {
+                        reject(new Error("The current connection attempt has not returned yet"));
+                        return;
                     }
 
                     if (!_qz.tools.ws) {
@@ -1231,7 +1133,6 @@ var qz = (function() {
                         options.host = [options.host];
                     }
 
-                    _qz.websocket.shutdown = false; //reset state for new connection attempt
                     var attempt = function(count) {
                         var tried = false;
                         var nextAttempt = function() {
@@ -1271,17 +1172,11 @@ var qz = (function() {
              */
             disconnect: function() {
                 return _qz.tools.promise(function(resolve, reject) {
-                    if (_qz.websocket.connection != null) {
-                        if (_qz.tools.isActive()) {
-                            // handles closing both 'connecting' and 'connected' states
-                            _qz.websocket.shutdown = true;
-                            _qz.websocket.connection.promise = { resolve: resolve, reject: reject };
-                            _qz.websocket.connection.close();
-                        } else {
-                            reject(new Error("Current connection is still closing"));
-                        }
+                    if (_qz.tools.isActive()) {
+                        _qz.websocket.connection.close();
+                        _qz.websocket.connection.promise = { resolve: resolve, reject: reject };
                     } else {
-                        reject(new Error("No open connection with QZ Tray"));
+                        reject(new Error("No open connection with QZ Tray"))
                     }
                 });
             },
@@ -1411,27 +1306,6 @@ var qz = (function() {
             },
 
             /**
-             * Clear the queue of a specified printer or printers. Does not delete retained jobs.
-             *
-             * @param {string|Object} [options] Name of printer to clear
-             *  @param {string} [options.printerName] Name of printer to clear
-             *  @param {number} [options.jobId] Cancel a job of a specific JobId instead of canceling all. Must include a printerName.
-             *
-             * @returns {Promise<null|Error>}
-             * @since 2.2.4
-             *
-             * @memberof qz.printers
-             */
-            clearQueue: function(options) {
-                if (typeof options !== 'object') {
-                    options = {
-                        printerName: options
-                    };
-                }
-                return _qz.websocket.dataPromise('printers.clearQueue', options);
-            },
-
-            /**
              * Stop listening for printer status actions.
              *
              * @returns {Promise<null|Error>}
@@ -1493,7 +1367,7 @@ var qz = (function() {
              *   @param {number} [options.bounds.y=0] Distance from top for bounding box starting corner
              *   @param {number} [options.bounds.width=0] Width of bounding box
              *   @param {number} [options.bounds.height=0] Height of bounding box
-             *  @param {string} [options.colorType='color'] Valid values <code>[color | grayscale | blackwhite | default]</code>
+             *  @param {string} [options.colorType='color'] Valid values <code>[color | grayscale | blackwhite]</code>
              *  @param {number} [options.copies=1] Number of copies to be printed.
              *  @param {number|Array<number>|Object|Array<Object>|string} [options.density=0] Pixel density (DPI, DPMM, or DPCM depending on <code>[options.units]</code>).
              *      If provided as an array, uses the first supported density found (or the first entry if none found).
@@ -1600,8 +1474,6 @@ var qz = (function() {
          *   @param {string} [data.options.pageRanges] Optional with <code>[pdf]</code> formats. Comma-separated list of page ranges to include.
          *   @param {boolean} [data.options.ignoreTransparency=false] Optional with <code>[pdf]</code> formats. Instructs transparent PDF elements to be ignored.
          *       Transparent PDF elements are known to degrade performance and quality when printing.
-         *   @param {boolean} [data.options.altFontRendering=false] Optional with <code>[pdf]</code> formats. Instructs PDF to be rendered using PDFBOX 1.8 techniques.
-         *       Drastically improves low-DPI PDF print quality on Windows.
          * @param {...*} [arguments] Additionally three more parameters can be specified:<p/>
          *     <code>{boolean} [resumeOnError=false]</code> Whether the chain should continue printing if it hits an error on one the the prints.<p/>
          *     <code>{string|Array<string>} [signature]</code> Pre-signed signature(s) of the JSON string for containing <code>call</code>, <code>params</code>, and <code>timestamp</code>.<p/>
@@ -2664,13 +2536,11 @@ var qz = (function() {
              *
              * @param {Function|AsyncFunction|Promise<string>} promiseHandler Either a function that will be used as a promise resolver (of format <code>Function({function} resolve, {function}reject)</code>),
              *     an async function, or a promise. Any of which should return the public certificate via their respective <code>resolve</code> call.
-             * @param {Object} [options] Configuration options for the certificate resolver
-             *  @param {boolean} [options.rejectOnFailure=[false]] Overrides default behavior to call resolve with a blank certificate on failure.
+             *
              * @memberof qz.security
              */
-            setCertificatePromise: function(promiseHandler, options) {
+            setCertificatePromise: function(promiseHandler) {
                 _qz.security.certHandler = promiseHandler;
-                _qz.security.rejectOnCertFailure = !!(options && options.rejectOnFailure);
             },
 
             /**

@@ -76,9 +76,6 @@ public class AWTMenuWrapper {
     private void wrapState(JMenuItem item) {
         if (this.item instanceof CheckboxMenuItem && item instanceof JCheckBoxMenuItem) {
             ((CheckboxMenuItem)this.item).setState(((JCheckBoxMenuItem)item).getState());
-            item.addChangeListener(e -> {
-                ((CheckboxMenuItem)this.item).setState(((JCheckBoxMenuItem)item).getState());
-            });
         }
     }
 

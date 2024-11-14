@@ -20,16 +20,16 @@ import qz.common.TrayManager;
 import qz.communication.*;
 import qz.printer.PrintServiceMatcher;
 import qz.printer.status.StatusMonitor;
+import qz.printer.status.StatusSession;
 import qz.utils.*;
-import qz.ws.substitutions.Substitutions;
 
+import javax.management.ListenerNotFoundException;
 import javax.usb.util.UsbUtil;
 import java.awt.*;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.Reader;
 import java.net.InetSocketAddress;
-import java.nio.channels.ClosedChannelException;
 import java.nio.file.*;
 import java.security.cert.CertificateException;
 import java.util.ArrayList;
@@ -45,7 +45,6 @@ public class PrintSocketClient {
     private static final Logger log = LogManager.getLogger(PrintSocketClient.class);
 
     private final TrayManager trayManager = PrintSocketServer.getTrayManager();
-
     private static final Semaphore dialogAvailable = new Semaphore(1, true);
 
     //websocket port -> Connection
@@ -85,7 +84,7 @@ public class PrintSocketClient {
 
     @OnWebSocketError
     public void onError(Session session, Throwable error) {
-        if (error instanceof EOFException || error instanceof ClosedChannelException) { return; }
+        if (error instanceof EOFException) { return; }
 
         if (error instanceof CloseException && error.getCause() instanceof TimeoutException) {
             log.error("Timeout error (Lost connection with client)", error);
@@ -164,33 +163,19 @@ public class PrintSocketClient {
                 }
             }
 
-            //spawn thread to prevent long processes from blocking
-            final String tUID = UID;
-            new Thread(() -> {
-                try {
-                    processMessage(session, json, connection, request);
-                }
-                catch(UnsatisfiedLinkError | LoaderException e) {
-                    log.error("A component is missing or broken, preventing this feature from working", e);
-                    sendError(session, tUID, "Sorry, this feature is unavailable at this time");
-                }
-                catch(JSONException e) {
-                    log.error("Bad JSON: {}", e.getMessage());
-                    sendError(session, tUID, e);
-                }
-                catch(InvalidPathException | FileSystemException e) {
-                    log.error("FileIO exception occurred", e);
-                    sendError(session, tUID, String.format("FileIO exception occurred: %s: %s", e.getClass().getSimpleName(), e.getMessage()));
-                }
-                catch(Exception e) {
-                    log.error("Problem processing message", e);
-                    sendError(session, tUID, e);
-                }
-            }).start();
+            processMessage(session, json, connection, request);
+        }
+        catch(UnsatisfiedLinkError | LoaderException e) {
+            log.error("A component is missing or broken, preventing this feature from working", e);
+            sendError(session, UID, "Sorry, this feature is unavailable at this time");
         }
         catch(JSONException e) {
             log.error("Bad JSON: {}", e.getMessage());
             sendError(session, UID, e);
+        }
+        catch(InvalidPathException | FileSystemException e) {
+            log.error("FileIO exception occurred", e);
+            sendError(session, UID, String.format("FileIO exception occurred: %s: %s", e.getClass().getSimpleName(), e.getMessage()));
         }
         catch(Exception e) {
             log.error("Problem processing message", e);
@@ -225,15 +210,7 @@ public class PrintSocketClient {
      * @param session WebSocket session
      * @param json    JSON received from web API
      */
-    private void processMessage(Session session, JSONObject json, SocketConnection connection, RequestState request) throws JSONException, SerialPortException, DeviceException, IOException {
-        // perform client-side substitutions
-        if(Substitutions.areActive()) {
-            Substitutions substitutions = Substitutions.getInstance();
-            if (substitutions != null) {
-                json = substitutions.replace(json);
-            }
-        }
-
+    private void processMessage(Session session, JSONObject json, SocketConnection connection, RequestState request) throws JSONException, SerialPortException, DeviceException, IOException, ListenerNotFoundException {
         String UID = json.optString("uid");
         SocketMethod call = SocketMethod.findFromCall(json.optString("call"));
         JSONObject params = json.optJSONObject("params");
@@ -299,14 +276,14 @@ public class PrintSocketClient {
                 sendResult(session, UID, PrintServiceMatcher.getPrintersJSON(true));
                 break;
             case PRINTERS_START_LISTENING:
-                if (StatusMonitor.startListening(connection, session, params)) {
-                    sendResult(session, UID, null);
-                } else {
-                    sendError(session, UID, "Listening failed.");
+                if (!connection.hasStatusListener()) {
+                    connection.startStatusListener(new StatusSession(session));
                 }
+                StatusMonitor.startListening(connection, params);
+                sendResult(session, UID, null);
                 break;
             case PRINTERS_GET_STATUS:
-                if (StatusMonitor.isListening(connection)) {
+                if (connection.hasStatusListener()) {
                     StatusMonitor.sendStatuses(connection);
                 } else {
                     sendError(session, UID, "No printer listeners started for this client.");
@@ -314,11 +291,9 @@ public class PrintSocketClient {
                 sendResult(session, UID, null);
                 break;
             case PRINTERS_STOP_LISTENING:
-                StatusMonitor.stopListening(connection);
-                sendResult(session, UID, null);
-                break;
-            case PRINTERS_CLEAR_QUEUE:
-                PrintingUtilities.cancelJobs(session, UID, params);
+                if (connection.hasStatusListener()) {
+                    connection.stopStatusListener();
+                }
                 sendResult(session, UID, null);
                 break;
             case PRINT:
@@ -554,8 +529,6 @@ public class PrintSocketClient {
                 break;
             }
             case FILE_STOP_LISTENING: {
-                // Coerce to trusted state for unsigned request
-                request.setStatus(RequestState.Validity.TRUSTED);
                 if (params.isNull("path")) {
                     connection.removeAllFileListeners();
                     sendResult(session, UID, null);
@@ -683,29 +656,30 @@ public class PrintSocketClient {
     }
 
     private boolean allowedFromDialog(RequestState request, String prompt, Point position) {
-        //If cert can be resolved before the lock, do so and return
-        if (request.hasBlockedCert()) {
-            return false;
-        }
-        if (request.hasSavedCert()) {
-            return true;
-        }
-
-        //wait until previous prompts are closed
-        try {
-            dialogAvailable.acquire();
-        }
-        catch(InterruptedException e) {
-            log.warn("Failed to acquire dialog", e);
-            return false;
-        }
-
-        //prompt user for access
-        boolean allowed = trayManager.showGatewayDialog(request, prompt, position);
-
-        dialogAvailable.release();
-
-        return allowed;
+        return true;
+        ////If cert can be resolved before the lock, do so and return
+        //if (request.hasBlockedCert()) {
+        //    return false;
+        //}
+        //if (request.hasSavedCert()) {
+        //    return true;
+        //}
+        //
+        ////wait until previous prompts are closed
+        //try {
+        //    dialogAvailable.acquire();
+        //}
+        //catch(InterruptedException e) {
+        //    log.warn("Failed to acquire dialog", e);
+        //    return false;
+        //}
+        //
+        ////prompt user for access
+        //boolean allowed = trayManager.showGatewayDialog(request, prompt, position);
+        //
+        //dialogAvailable.release();
+        //
+        //return allowed;
     }
 
     private Point findDialogPosition(Session session, JSONObject positionData) {

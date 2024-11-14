@@ -37,8 +37,7 @@ public abstract class PrintPixel {
         PrintRequestAttributeSet attributes = new HashPrintRequestAttributeSet();
 
         //apply general attributes
-        // If colortype is default, leave printColor blank. The system's printer settings will be used instead.
-        if (pxlOpts.getColorType() != PrintOptions.ColorType.DEFAULT) {
+        if (pxlOpts.getColorType() != null) {
             attributes.add(pxlOpts.getColorType().getAsChromaticity());
         }
         attributes.add(pxlOpts.getDuplex());

@@ -1,7 +1,7 @@
 package qz.build.jlink;
 
 import com.github.zafarkhaja.semver.Version;
-import qz.build.provision.params.Arch;
+import qz.build.JLink;
 
 /**
  * Handling of java vendors
@@ -47,42 +47,13 @@ public enum Vendor implements Parsable {
             case AARCH64:
                 // All vendors seem to use "aarch64" universally
                 return "aarch64";
-            case ARM32:
-                switch(this) {
-                    case BELLSOFT:
-                        return "arm32-vfp-hflt";
-                    case AZUL:
-                        return "aarch32hf";
-                    case MICROSOFT:
-                    case IBM:
-                        throw new UnsupportedOperationException("Vendor does not provide builds for this architecture");
-                    case AMAZON:
-                    case ECLIPSE:
-                    default:
-                        return "arm";
-                }
-            case RISCV64:
-                return "riscv64";
-            case X86:
-                switch(this) {
-                    case AZUL:
-                        return "i686";
-                    case BELLSOFT:
-                        return "i586";
-                    case ECLIPSE:
-                    case IBM:
-                        return "x86-32";
-                    case AMAZON:
-                    default:
-                        return "x86";
-                }
-            case X86_64:
-            default:
+            case AMD64:
                 switch(this) {
                     // BellSoft uses "amd64"
                     case BELLSOFT:
                         return "amd64";
                 }
+            default:
                 return "x64";
         }
     }

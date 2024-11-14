@@ -3,9 +3,7 @@ package qz.installer.certificate.firefox.locator;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import qz.utils.ShellUtilities;
 import qz.utils.SystemUtilities;
-import qz.utils.UnixUtilities;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -25,8 +23,9 @@ public class LinuxAppLocator extends AppLocator {
         // Search for matching executable in all path values
         aliasLoop:
         for(AppAlias.Alias alias : appAlias.aliases) {
+
             // Add non-standard app search locations (e.g. Fedora)
-            for (String dirname : appendPaths(alias.getPosix(), "/usr/lib/$/bin", "/usr/lib64/$/bin", "/usr/lib/$", "/usr/lib64/$")) {
+            for (String dirname : appendPaths(alias.getPosix(), "/usr/lib/$/bin", "/usr/lib64/$/bin")) {
                 Path path = Paths.get(dirname, alias.getPosix());
                 if (Files.isRegularFile(path) && Files.isExecutable(path)) {
                     log.info("Found {} {}: {}, investigating...", alias.getVendor(), alias.getName(true), path);
@@ -38,21 +37,11 @@ public class LinuxAppLocator extends AppLocator {
                             // Reset the executable back to /snap/bin/firefox to get proper version information
                             file = path.toFile();
                         }
+                        String contentType = Files.probeContentType(file.toPath());
                         if(file.getPath().endsWith(".sh")) {
                             // Legacy Ubuntu likes to use .../firefox/firefox.sh, return .../firefox/firefox instead
                             log.info("Found an '.sh' file: {}, removing file extension: {}", file, file = new File(FilenameUtils.removeExtension(file.getPath())));
-                        }
-                        String contentType = Files.probeContentType(file.toPath());
-                        if(contentType == null) {
-                            // Fallback to commandline per https://bugs.openjdk.org/browse/JDK-8188228
-                            contentType = ShellUtilities.executeRaw("file", "--mime-type", "--brief", file.getPath()).trim();
-                        }
-                        if(contentType != null && contentType.endsWith("/x-shellscript")) {
-                            if(UnixUtilities.isFedora()) {
-                                // Firefox's script is full of variables and not parsable, fallback to /usr/lib64/$, etc
-                                log.info("Found shell script at {}, but we're on Fedora, so we'll look in some known locations instead.", file.getPath());
-                                continue;
-                            }
+                        } else if(contentType != null && contentType.equals("application/x-shellscript")) {
                             // Debian and Arch like to place a stub script directly in /usr/bin/
                             // TODO: Split into a function; possibly recurse on search paths
                             log.info("{} bin was expected but script found...  Reading...", appAlias.name());
@@ -81,7 +70,6 @@ public class LinuxAppLocator extends AppLocator {
                                     }
                                 }
                             }
-                            reader.close();
                         } else {
                             log.info("Assuming {} {} is installed: {}", alias.getVendor(), alias.getName(true), file);
                         }
